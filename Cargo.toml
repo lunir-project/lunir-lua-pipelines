@@ -1,0 +1,21 @@
+[workspace]
+
+members = [
+  "lunir-lua50",
+  "lunir-lua51",
+  "lunir-lua52",
+  "lunir-lua53",
+  "lunir-lua54",
+  "lunir-luau"
+  ]
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
+categories = [
+  "compilers",
+  "parsing",
+]
+
+[workspace.dependencies]
+logos = "0.12.1"
+chumsky = "1.0.0-alpha.3"
