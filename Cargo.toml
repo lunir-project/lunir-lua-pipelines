@@ -6,7 +6,8 @@ members = [
   "lunir-lua52",
   "lunir-lua53",
   "lunir-lua54",
-  "lunir-luau"
+  "lunir-luau",
+  "lunir-lua-cli",
   ]
 
 [workspace.package]
@@ -17,5 +18,8 @@ categories = [
 ]
 
 [workspace.dependencies]
-logos = "0.12.1"
-chumsky = "1.0.0-alpha.3"
+ariadne = "0.2.0"
+lifering = "0.4.0"
+logos = "0.13.0"
+chumsky = { version = "1.0.0-alpha.3", features = ["label", "spill-stack"] }
+tinyvec = { version = "1.6.0", features = ["alloc", "rustc_1_57"] }
