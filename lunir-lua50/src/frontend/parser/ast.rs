@@ -19,6 +19,7 @@ pub enum NodeKind {
     Root,
     String,
     VariableDeclaration,
+    VariableDeclarations,
     Table,
     UnaryOperation,
     BinaryOperation,
@@ -69,14 +70,7 @@ pub enum Locality {
 }
 
 #[derive(Clone, Debug)]
-pub struct VariableDeclarationData {
-    initialized_to: Node,
-    locality: Locality,
-    name: String,
-}
-
-#[derive(Clone, Debug)]
 pub struct FunctionData {
-    pub(crate) name: Option<String>,
-    pub(crate) args: TinyVec<[String; 3]>,
+    pub name: Option<String>,
+    pub args: TinyVec<[String; 3]>,
 }

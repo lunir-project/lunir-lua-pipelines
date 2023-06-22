@@ -21,5 +21,5 @@ categories = [
 ariadne = "0.2.0"
 lifering = "0.4.0"
 logos = "0.13.0"
-chumsky = { version = "1.0.0-alpha.3", features = ["label", "spill-stack"] }
+chumsky = { version = "1.0.0-alpha.4", features = ["label", "spill-stack"] }
 tinyvec = { version = "1.6.0", features = ["alloc", "rustc_1_57"] }

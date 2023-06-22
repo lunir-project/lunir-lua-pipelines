@@ -9,7 +9,7 @@ use logos::{Filter, Lexer, Logos};
 
 #[derive(Clone, Debug, Logos, PartialEq)]
 #[logos(skip r"\s")]
-pub(super) enum Token<'a> {
+pub enum Token<'a> {
     /// The "`+`" operator.
     #[token("+")]
     Add,
@@ -46,9 +46,7 @@ pub(super) enum Token<'a> {
     #[token(",")]
     Comma,
 
-    /// Line and block comments, line comments are eaten by
-    /// the lexer, but block comments are left for the parser
-    /// to handle.
+    /// Line comments
     #[token("--", comment)]
     CommentStart,
 
@@ -187,9 +185,13 @@ pub(super) enum Token<'a> {
     Semicolon,
 
     /// Lua string literals.
-    #[regex(r#""([^\\"]|\\.)*""#, string_literal)]
+    #[regex(r#""([^\\"]|\.)*""#, string_literal)]
     StringLiteral(&'a str),
 
+    // /// Lua multi-line string literals.
+    // #[regex(r#"(\[\[([^\\(\[\[|\]\])]|\\.)*\]\])"#, string_literal)]
+    // MultilineLiteral(&'a str),
+    //
     /// The "`-`" operator.
     #[token("-")]
     Subtract,
@@ -281,8 +283,9 @@ impl<'a> Token<'a> {
     #[inline]
     pub fn lex_unspanned(source: &'a str) -> Vec<Self> {
         Self::lexer(source)
+            .inspect(|tok| println!("{tok:?}"))
             .filter_map(|tok| {
-                let t = tok.unwrap();
+                let t = dbg!(tok).unwrap();
                 (!matches!(t, Token::Newline)).then_some(t)
             })
             .collect::<Vec<_>>()
@@ -302,10 +305,13 @@ impl<'a> Token<'a> {
 }
 
 fn comment<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Filter<()> {
-    // Let parser handle block comments
-    if matches!(lex.peekable().peek().unwrap().unwrap(), Token::OpenBracket) {
-        return Filter::Emit(());
-    }
+    // // Let parser handle block comments
+    // if matches!(
+    //     lex.peekable().peek().unwrap().as_ref().unwrap(),
+    //     Token::OpenBracket
+    // ) {
+    //     return Filter::Emit(());
+    // }
 
     // Lexer can eat line comments
     for tok in lex {
@@ -318,10 +324,13 @@ fn comment<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Filter<()> {
 }
 
 fn string_literal<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
-    let slice = lex.slice();
-    let len = slice.len();
+    let slice = dbg!(lex.slice());
 
-    &slice[1..len - 1]
+    if let Some(slice) = dbg!(slice.strip_prefix('"')) {
+        dbg!(slice.strip_suffix('"')).expect("Invalid string literal.")
+    } else {
+        unreachable!()
+    }
 }
 
 /// Returns a vector of [`Token`]s.

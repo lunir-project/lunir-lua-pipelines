@@ -6,7 +6,7 @@ use lifering::lifering;
 
 fn verify(tokens: &[Token], ground_truth: &[Token]) {
     for (index, either_tokens) in tokens.iter().zip_longest(ground_truth.iter()).enumerate() {
-        let (ground_truth_token, token) = either_tokens.both().expect(&format!(
+        let (token, ground_truth_token) = either_tokens.both().expect(&format!(
             "Slice length mismatch reached at {index}.\nDump:\n{tokens:#?}"
         ));
 
@@ -246,6 +246,7 @@ fn table_indexing() {
 	    ["hello"] = function(p) print(p) end;
         [true] = 3;
         [false] = -5;
+        hi = 9;
         [3] = "hello";
     }
 
@@ -281,6 +282,10 @@ fn table_indexing() {
         Assign,
         Number(lifering!(-5.0)),
         Semicolon,
+        Identifier("hi"),
+        Assign,
+        Number(lifering!(9.0)),
+        Semicolon,
         OpenBracket,
         Number(lifering!(3.0)),
         CloseBracket,
@@ -308,13 +313,14 @@ fn table_indexing() {
 
 #[test]
 fn boolean_literals() {
-    let a = lex(r#"true false true falsee truee false"#);
+    let a = lex(r#"true false true falsee truee "true" false"#);
     let b = [
         True,
         False,
         True,
         Identifier("falsee"),
         Identifier("truee"),
+        StringLiteral("true"),
         False,
     ];
 
@@ -337,8 +343,12 @@ fn numeric_literals() {
 
 #[test]
 fn string_literal() {
-    let a = lex(r#""what's up?""#);
-    let b = [StringLiteral("what's up?")];
+    let a = lex(r#""what's up?" "hi" "hello""#);
+    let b = [
+        StringLiteral("what's up?"),
+        StringLiteral("hi"),
+        StringLiteral("hello"),
+    ];
 
     verify(&a, &b);
 }

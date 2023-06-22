@@ -1,14 +1,16 @@
+use std::cmp::max;
+
 use crate::frontend::lexer::Token::{self, *};
 use crate::frontend::parser::parsing::NodeData::KeyValuePair;
+use chumsky::recursive::Indirect;
 use chumsky::{
     extra::Err, input::SpannedInput, prelude::IterParser, prelude::*, recursive::Recursive,
 };
-use tinyvec::TinyVec;
 
-use super::ast::{Block, FunctionData, Locality, Node, NodeData, NodeKind, UnaryOperator};
+use super::ast::{self, Block, FunctionData, Locality, Node, NodeData, NodeKind, UnaryOperator};
 
 type TokenSpanPair<'a> = (Token<'a>, SimpleSpan);
-type SpannedTokens<'a> = SpannedInput<Token<'a>, SimpleSpan, &'a [TokenSpanPair<'a>]>;
+pub(super) type SpannedTokens<'a> = SpannedInput<Token<'a>, SimpleSpan, &'a [TokenSpanPair<'a>]>;
 type RichError<'a> = Err<Rich<'a, Token<'a>>>;
 
 pub(crate) fn lua50<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
@@ -16,6 +18,7 @@ pub(crate) fn lua50<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<
 
     block.define(
         statement(block.clone())
+            .or(expression())
             .padded_by(just(Semicolon).repeated())
             .repeated()
             .collect::<Block>(),
@@ -31,47 +34,176 @@ pub(crate) fn lua50<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<
 fn statement<'a>(
     block_parser: impl Parser<'a, SpannedTokens<'a>, Block, RichError<'a>> + Clone,
 ) -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    choice((variable_declaration(), function(block_parser)))
+    let function = group((
+        just(Function).ignored(),
+        identifier().labelled("function name").or_not(),
+        identifier_list()
+            .delimited_by(just(OpenParen), just(CloseParen))
+            .labelled("function arguments"),
+        block_parser,
+        just(End).ignored(),
+    ))
+    .map(|(_, name, args, body, _)| Node {
+        children: body,
+        data: Some(NodeData::Function(Box::new(FunctionData {
+            name: name.map(|n| n.to_string()),
+            args: args.iter().map(|a| a.to_string()).collect(),
+        }))),
+        kind: NodeKind::Function,
+    });
+
+    choice((variable_declaration(), function))
 }
 
 fn variable_declaration<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
     group((
-        just(Local).ignored().or_not().labelled("local"),
-        identifier().labelled("name"),
-        group((just(Assign).ignored(), expression())).or_not(),
+        just(Local)
+            .or_not()
+            .labelled("local")
+            .map(|local| local.is_some()),
+        identifier()
+            .labelled("name")
+            .separated_by(just(Comma))
+            .at_least(1)
+            .collect::<Vec<_>>()
+            .labelled("names"),
+        just(Assign)
+            .ignore_then(
+                expression()
+                    .labelled("initialiser")
+                    .separated_by(just(Comma))
+                    .at_least(1)
+                    .collect::<Vec<_>>()
+                    .labelled("initialisers"),
+            )
+            .or_not(),
     ))
-    .map(|(locality, name, initialised_to)| {
-        let mut n = Node {
-            children: vec![Node {
-                children: vec![],
-                data: Some(NodeData::String(Box::new(name.to_string()))),
-                kind: NodeKind::String,
-            }],
-            data: Some(NodeData::Locality(match locality {
-                Some(_) => Locality::Local,
-                None => Locality::Global,
-            })),
-            kind: NodeKind::VariableDeclaration,
-        };
-
-        if let Some(t) = initialised_to {
-            n.children.push(t.1);
+    .map(|(is_local, names, initialised_to)| {
+        if let Some(init) = &initialised_to {
+            if init.len() > names.len() {
+                panic!()
+            }
         }
 
-        n
+        let initialised_to = initialised_to.unwrap();
+
+        let mut nodes = Vec::with_capacity(names.len());
+
+        for (index, name) in names.iter().enumerate() {
+            let mut node = Node {
+                children: vec![Node {
+                    children: vec![],
+                    data: Some(NodeData::String(Box::new(name.to_string()))),
+                    kind: NodeKind::String,
+                }],
+                data: Some(NodeData::Locality(if is_local {
+                    Locality::Local
+                } else {
+                    Locality::Global
+                })),
+                kind: NodeKind::VariableDeclaration,
+            };
+
+            node.children[0]
+                .children
+                .push(initialised_to[index].clone());
+
+            nodes.push(node);
+        }
+
+        Node {
+            children: nodes,
+            data: None,
+            kind: NodeKind::VariableDeclarations,
+        }
     })
 }
 
-fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    choice((variable_name(), literal(), unary_operation())).labelled("expression")
-}
+fn expression<'a>() -> Recursive<Indirect<'a, 'a, SpannedTokens<'a>, Node, RichError<'a>>> {
+    let mut expr = Recursive::declare();
 
-fn literal<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    choice((string_literal(), number_literal(), boolean_literal()))
-}
+    let variable_name = identifier().labelled("variable name").map(|n| Node {
+        children: vec![],
+        kind: NodeKind::Identifier,
+        data: Some(NodeData::Identifier(Box::new(n.to_string()))),
+    });
 
-fn expression_list<'a>() -> impl Parser<'a, SpannedTokens<'a>, (), RichError<'a>> + Clone {
-    expression().separated_by(just(Comma)).allow_trailing()
+    let string_literal = select! {
+    StringLiteral(string) => Node {
+            children: vec![],
+            kind: NodeKind::String,
+            data: Some(NodeData::String(Box::new(string.to_string())))
+    }}
+    .labelled("string literal");
+
+    let number_literal = number()
+        .map(|n| Node {
+            children: vec![],
+            data: Some(NodeData::Number(n)),
+            kind: NodeKind::Number,
+        })
+        .labelled("number");
+
+    let boolean_literal = just(True)
+        .or(just(False))
+        .map(|tok| Node {
+            children: vec![],
+            data: Some(NodeData::Boolean(matches!(tok, True))),
+            kind: NodeKind::Boolean,
+        })
+        .labelled("boolean");
+
+    let literal = choice((string_literal, number_literal, boolean_literal));
+
+    let parenthetic_expression = expr.clone().delimited_by(just(OpenParen), just(CloseParen));
+    let atom = literal.or(parenthetic_expression);
+
+    let unary_operation = just(Not)
+        .or(just(Subtract))
+        .repeated()
+        .foldr(atom.clone(), |op, exp| Node {
+            children: vec![exp],
+            data: Some(NodeData::UnaryOperation(match op {
+                Not => UnaryOperator::Not,
+                Subtract => UnaryOperator::Negate,
+                _ => unreachable!(),
+            })),
+            kind: NodeKind::UnaryOperation,
+        });
+
+    let product_operation = unary_operation.clone().foldl(
+        product_operations()
+            .then(unary_operation.clone())
+            .repeated(),
+        |lhs, (op, rhs)| Node {
+            children: vec![lhs, rhs],
+            data: Some(NodeData::BinaryOperation(match op {
+                Multiply => ast::BinaryOperator::Multiply,
+                Divide => ast::BinaryOperator::Divide,
+                _ => unreachable!(),
+            })),
+            kind: NodeKind::BinaryOperation,
+        },
+    );
+
+    let binary_operation = product_operation.clone().foldl(
+        sum_operations().then(product_operation.clone()).repeated(),
+        |lhs, (op, rhs)| Node {
+            children: vec![lhs, rhs],
+            data: Some(NodeData::BinaryOperation(match op {
+                Add => ast::BinaryOperator::Add,
+                Subtract => ast::BinaryOperator::Subtract,
+                _ => unreachable!(),
+            })),
+            kind: NodeKind::BinaryOperation,
+        },
+    );
+
+    expr.define(
+        choice((atom, variable_name, unary_operation, binary_operation)).labelled("expression"),
+    );
+
+    expr
 }
 
 fn map<'a>() -> impl Parser<'a, SpannedTokens<'a>, Vec<(Node, Node)>, RichError<'a>> + Clone {
@@ -100,48 +232,28 @@ fn map<'a>() -> impl Parser<'a, SpannedTokens<'a>, Vec<(Node, Node)>, RichError<
 //         })
 // }
 
-fn boolean_literal<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    choice((just(True), just(False))).map(|tok| Node {
-        children: vec![],
-        data: Some(NodeData::Boolean(matches!(tok, True))),
-        kind: NodeKind::Boolean,
-    })
+fn sum_operations<'a>() -> impl Parser<'a, SpannedTokens<'a>, Token<'a>, RichError<'a>> + Clone {
+    just(Add).or(just(Subtract))
 }
 
-fn boolean<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    choice((boolean_literal(), variable_name())).labelled("boolean")
+fn product_operations<'a>() -> impl Parser<'a, SpannedTokens<'a>, Token<'a>, RichError<'a>> + Clone
+{
+    just(Multiply).or(just(Divide))
 }
 
-fn unary_operation<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    let mut unary = Recursive::declare();
-
-    unary.define(
-        just(Not)
-            .or(just(Subtract))
-            .repeated()
-            .foldr(expression(), |op, exp| Node {
-                children: vec![exp],
-                data: Some(NodeData::UnaryOperation(match op {
-                    Not => UnaryOperator::Not,
-                    Subtract => UnaryOperator::Negate,
-                    _ => unreachable!(),
-                })),
-                kind: NodeKind::UnaryOperation,
-            }),
-    );
-
-    unary
-}
-
-fn binary_operation<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
-    expression().foldl(just(Add), |prev, e| Node {
-        children: vec![prev],
-        data: todo!(),
-        kind: todo!(),
-    });
-
-    todo!()
-}
+// fn binary_operation<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
+//     expression().foldl(
+//         product_operations()
+//             .or(sum_operations())
+//             .ignore_then(expression())
+//             .repeated(),
+//         |prev, e| Node {
+//             children: vec![prev, e],
+//             data: Some(NodeData::BinaryOperation(super::ast::BinaryOperator::Add)),
+//             kind: NodeKind::BinaryOperation,
+//         },
+//     )
+// }
 
 fn function<'a>(
     block_parser: impl Parser<'a, SpannedTokens<'a>, Block, RichError<'a>> + Clone,
