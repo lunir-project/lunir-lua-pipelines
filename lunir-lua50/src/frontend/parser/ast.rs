@@ -40,10 +40,18 @@ pub enum UnaryOperator {
 #[derive(Clone, Debug)]
 pub enum BinaryOperator {
     Add,
+    And,
     Concat,
     Divide,
+    Eq,
     Exponentiate,
+    Ge,
+    Gt,
+    Le,
+    Lt,
     Multiply,
+    Ne,
+    Or,
     Subtract,
 }
 
