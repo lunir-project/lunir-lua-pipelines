@@ -31,19 +31,8 @@ fn parse_variable_decls() {
 
 // TODO: remove
 #[test]
-fn parse_bare_binops() {
-    let lexemes = lex_spanned!(r#"1 + 2 + 3"#);
-    let len = lexemes.len();
-    let eoi = SimpleSpan::new(len, len);
-    let spanned_input = (lexemes[..].spanned::<_, _>(eoi)).clone();
-
-    panic!("{:#?}", parsing::lua50().parse(spanned_input));
-}
-
-// TODO: remove
-#[test]
-fn parse_right_associative() {
-    let lexemes = lex_spanned!(r#"3 ^ 4 ^ 0.5 * 10 ^ 3"#);
+fn parse_table_bracket_indexing() {
+    let lexemes = lex_spanned!(r#"x = t[a[b[c[d[e]]]]]"#);
     let len = lexemes.len();
     let eoi = SimpleSpan::new(len, len);
     let spanned_input = (lexemes[..].spanned(eoi)).clone();

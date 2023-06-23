@@ -11,18 +11,19 @@ pub struct Node {
 
 #[derive(Clone, Debug)]
 pub enum NodeKind {
+    BinaryOperation,
     Boolean,
     Function,
     Identifier,
+    IndexingOperation,
     KeyValuePair,
     Number,
     Root,
     String,
-    VariableDeclaration,
-    VariableDeclarations,
     Table,
     UnaryOperation,
-    BinaryOperation,
+    VariableDeclaration,
+    VariableDeclarations,
 }
 
 impl Default for NodeKind {

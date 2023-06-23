@@ -19,7 +19,6 @@ pub(crate) fn lua50<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<
 
     block.define(
         statement(block.clone())
-            .or(expression())
             .padded_by(just(Semicolon).repeated())
             .repeated()
             .collect::<Block>(),
@@ -157,7 +156,36 @@ fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> +
     let literal = choice((string_literal, number_literal, boolean_literal));
 
     let parenthetic_expression = expr.clone().delimited_by(just(OpenParen), just(CloseParen));
-    let atom = literal.or(parenthetic_expression);
+    let atom = literal.or(parenthetic_expression).or(variable_name);
+
+    // let dot_indexing_operation = atom
+    //     .clone()
+    //     .labelled("table")
+    //     .then_ignore(just(Period))
+    //     .repeated()
+    //     .foldr(node_identifier(), |a, b| Node {
+    //         children: vec![a, b],
+    //         data: None,
+    //         kind: NodeKind::IndexingOperation,
+    //     })
+    //     .boxed();
+
+    // let bracket_indexing_operation = dot_indexing_operation
+    //     .clone()
+    //     .labelled("table")
+    //     .then_ignore(just(OpenBracket))
+    //     .repeated()
+    //     .foldr(
+    //         dot_indexing_operation
+    //             .clone()
+    //             .then_ignore(just(CloseBracket)),
+    //         |a, b| Node {
+    //             children: vec![a, b],
+    //             data: None,
+    //             kind: NodeKind::IndexingOperation,
+    //         },
+    //     )
+    //     .boxed();
 
     let exponentiation_operation = atom
         .clone()
@@ -178,7 +206,8 @@ fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> +
                 data: Some(NodeData::BinaryOperation(ast::BinaryOperator::Exponentiate)),
                 kind: NodeKind::BinaryOperation,
             })
-        });
+        })
+        .boxed();
 
     let unary_operation = just(Not)
         .labelled("not")
@@ -195,39 +224,48 @@ fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> +
                 })),
                 kind: NodeKind::UnaryOperation,
             },
-        );
+        )
+        .boxed();
 
-    let product_operation = unary_operation.clone().labelled("left-hand side").foldl(
-        product_operations()
-            .labelled("product operator")
-            .then(unary_operation.labelled("right-hand side"))
-            .repeated(),
-        |lhs, (op, rhs)| Node {
-            children: vec![lhs, rhs],
-            data: Some(NodeData::BinaryOperation(match op {
-                Multiply => ast::BinaryOperator::Multiply,
-                Divide => ast::BinaryOperator::Divide,
-                _ => unreachable!(),
-            })),
-            kind: NodeKind::BinaryOperation,
-        },
-    );
+    let product_operation = unary_operation
+        .clone()
+        .labelled("left-hand side")
+        .foldl(
+            product_operations()
+                .labelled("product operator")
+                .then(unary_operation.labelled("right-hand side"))
+                .repeated(),
+            |lhs, (op, rhs)| Node {
+                children: vec![lhs, rhs],
+                data: Some(NodeData::BinaryOperation(match op {
+                    Multiply => ast::BinaryOperator::Multiply,
+                    Divide => ast::BinaryOperator::Divide,
+                    _ => unreachable!(),
+                })),
+                kind: NodeKind::BinaryOperation,
+            },
+        )
+        .boxed();
 
-    let binary_operation = product_operation.clone().labelled("left-hand side").foldl(
-        sum_operations()
-            .labelled("sum operator")
-            .then(product_operation.labelled("right-hand side"))
-            .repeated(),
-        |lhs, (op, rhs)| Node {
-            children: vec![lhs, rhs],
-            data: Some(NodeData::BinaryOperation(match op {
-                Add => ast::BinaryOperator::Add,
-                Subtract => ast::BinaryOperator::Subtract,
-                _ => unreachable!(),
-            })),
-            kind: NodeKind::BinaryOperation,
-        },
-    );
+    let binary_operation = product_operation
+        .clone()
+        .labelled("left-hand side")
+        .foldl(
+            sum_operations()
+                .labelled("sum operator")
+                .then(product_operation.labelled("right-hand side"))
+                .repeated(),
+            |lhs, (op, rhs)| Node {
+                children: vec![lhs, rhs],
+                data: Some(NodeData::BinaryOperation(match op {
+                    Add => ast::BinaryOperator::Add,
+                    Subtract => ast::BinaryOperator::Subtract,
+                    _ => unreachable!(),
+                })),
+                kind: NodeKind::BinaryOperation,
+            },
+        )
+        .boxed();
 
     let concatenation_operation = binary_operation
         .clone()
@@ -248,7 +286,8 @@ fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> +
                 data: Some(NodeData::BinaryOperation(ast::BinaryOperator::Concat)),
                 kind: NodeKind::BinaryOperation,
             })
-        });
+        })
+        .boxed();
 
     let relational_operation = concatenation_operation
         .clone()
@@ -271,7 +310,8 @@ fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> +
                 })),
                 kind: NodeKind::BinaryOperation,
             },
-        );
+        )
+        .boxed();
 
     let and_operation = relational_operation
         .clone()
@@ -286,21 +326,26 @@ fn expression<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> +
                 data: Some(NodeData::BinaryOperation(ast::BinaryOperator::And)),
                 kind: NodeKind::BinaryOperation,
             },
-        );
+        )
+        .boxed();
 
-    let or_operation = and_operation.clone().labelled("left-hand side").foldl(
-        just(Or)
-            .labelled("or")
-            .ignore_then(and_operation.labelled("right-hand side"))
-            .repeated(),
-        |lhs, rhs| Node {
-            children: vec![lhs, rhs],
-            data: Some(NodeData::BinaryOperation(ast::BinaryOperator::Or)),
-            kind: NodeKind::BinaryOperation,
-        },
-    );
+    let or_operation = and_operation
+        .clone()
+        .labelled("left-hand side")
+        .foldl(
+            just(Or)
+                .labelled("or")
+                .ignore_then(and_operation.labelled("right-hand side"))
+                .repeated(),
+            |lhs, rhs| Node {
+                children: vec![lhs, rhs],
+                data: Some(NodeData::BinaryOperation(ast::BinaryOperator::Or)),
+                kind: NodeKind::BinaryOperation,
+            },
+        )
+        .boxed();
 
-    expr.define(choice((variable_name, or_operation)).labelled("expression"));
+    expr.define(or_operation.boxed().labelled("expression"));
 
     expr
 }
@@ -411,6 +456,14 @@ fn number<'a>() -> impl Parser<'a, SpannedTokens<'a>, f64, RichError<'a>> + Clon
 
 fn variable_name<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
     identifier().labelled("variable name").map(|n| Node {
+        children: vec![],
+        kind: NodeKind::Identifier,
+        data: Some(NodeData::Identifier(Box::new(n.to_string()))),
+    })
+}
+
+fn node_identifier<'a>() -> impl Parser<'a, SpannedTokens<'a>, Node, RichError<'a>> + Clone {
+    identifier().labelled("identifier").map(|n| Node {
         children: vec![],
         kind: NodeKind::Identifier,
         data: Some(NodeData::Identifier(Box::new(n.to_string()))),
